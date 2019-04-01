@@ -20,6 +20,8 @@ public class FingerprintAuthModule extends ReactContextBaseJavaModule implements
 
     private static final String FRAGMENT_TAG = "fingerprint_dialog";
 
+    private FingerprintManager.CryptoObject cryptoObject;
+    private FingerprintManager fingerprintManager;
     private KeyguardManager keyguardManager;
     private boolean isAppActive;
 
@@ -29,6 +31,33 @@ public class FingerprintAuthModule extends ReactContextBaseJavaModule implements
         super(reactContext);
 
         reactContext.addLifecycleEventListener(this);
+    }
+
+    @TargetApi(Build.VERSION_CODES.M)
+    private FingerprintManager.CryptoObject getCryptoObject() {
+        if (cryptoObject != null) {
+            return cryptoObject;
+        }
+
+        final Cipher cipher = new FingerprintCipher().getCipher();
+        cryptoObject = new FingerprintManager.CryptoObject(cipher);
+
+        return cryptoObject;
+    }
+
+    @TargetApi(Build.VERSION_CODES.M)
+    private FingerprintManager getFingerprintManager() {
+        if (fingerprintManager != null) {
+            return fingerprintManager;
+        }
+
+        final Activity activity = getCurrentActivity();
+        if (activity == null) {
+            return null;
+        }
+        fingerprintManager = (FingerprintManager) activity.getSystemService(Context.FINGERPRINT_SERVICE);
+
+        return fingerprintManager;
     }
 
     private KeyguardManager getKeyguardManager() {
@@ -57,15 +86,13 @@ public class FingerprintAuthModule extends ReactContextBaseJavaModule implements
             return;
         }
 
-        int result = isFingerprintAuthAvailable();
-        if (result == FingerprintAuthConstants.IS_SUPPORTED) {
-            reactSuccessCallback.invoke("Is supported.");
+        if (!isFingerprintAuthAvailable()) {
+            reactErrorCallback.invoke("Not supported.");
         } else {
-            reactErrorCallback.invoke("Not supported.", result);
+            reactSuccessCallback.invoke("Is supported.");
         }
     }
 
-    @TargetApi(Build.VERSION_CODES.M)
     @ReactMethod
     public void authenticate(final String reason, final ReadableMap authConfig, final Callback reactErrorCallback, final Callback reactSuccessCallback) {
         final Activity activity = getCurrentActivity();
@@ -74,28 +101,21 @@ public class FingerprintAuthModule extends ReactContextBaseJavaModule implements
         }
         inProgress = true;
 
-        int availableResult = isFingerprintAuthAvailable();
-        if (availableResult != FingerprintAuthConstants.IS_SUPPORTED) {
+        if (!isFingerprintAuthAvailable()) {
             inProgress = false;
-            reactErrorCallback.invoke("Not supported", availableResult);
+            reactErrorCallback.invoke("Not supported");
+            return;
+        }
+
+        final FingerprintManager.CryptoObject cryptoObject = this.getCryptoObject();
+        if (cryptoObject == null) {
+            inProgress = false;
+            reactErrorCallback.invoke("Not supported");
             return;
         }
 
         /* FINGERPRINT ACTIVITY RELATED STUFF */
-        final Cipher cipher = new FingerprintCipher().getCipher();
-        if (cipher == null) {
-            inProgress = false;
-            reactErrorCallback.invoke("Not supported", FingerprintAuthConstants.NOT_AVAILABLE);
-            return;
-        }
-
-        // We should call it only when we absolutely sure that API >= 23.
-        // Otherwise we will get the crash on older versions.
-        // TODO: migrate to FingerprintManagerCompat
-        final FingerprintManager.CryptoObject cryptoObject = new FingerprintManager.CryptoObject(cipher);
-
         final DialogResultHandler drh = new DialogResultHandler(reactErrorCallback, reactSuccessCallback);
-
         final FingerprintDialog fingerprintDialog = new FingerprintDialog();
         fingerprintDialog.setCryptoObject(cryptoObject);
         fingerprintDialog.setReasonForAuthentication(reason);
@@ -110,35 +130,23 @@ public class FingerprintAuthModule extends ReactContextBaseJavaModule implements
         fingerprintDialog.show(activity.getFragmentManager(), FRAGMENT_TAG);
     }
 
-    private int isFingerprintAuthAvailable() {
+    private boolean isFingerprintAuthAvailable() {
         if (android.os.Build.VERSION.SDK_INT < 23) {
-            return FingerprintAuthConstants.NOT_SUPPORTED;
-        }
-
-        final Activity activity = getCurrentActivity();
-        if (activity == null) {
-            return FingerprintAuthConstants.NOT_AVAILABLE; // we can't do the check
+            return false;
         }
 
         final KeyguardManager keyguardManager = getKeyguardManager();
-
-        // We should call it only when we absolutely sure that API >= 23.
-        // Otherwise we will get the crash on older versions.
-        // TODO: migrate to FingerprintManagerCompat
-        final FingerprintManager fingerprintManager = (FingerprintManager) activity.getSystemService(Context.FINGERPRINT_SERVICE);
-
-        if (fingerprintManager == null || !fingerprintManager.isHardwareDetected()) {
-            return FingerprintAuthConstants.NOT_PRESENT;
-        }
+        final FingerprintManager fingerprintManager = getFingerprintManager();
 
         if (keyguardManager == null || !keyguardManager.isKeyguardSecure()) {
-            return FingerprintAuthConstants.NOT_AVAILABLE;
+            return false;
         }
 
-        if (!fingerprintManager.hasEnrolledFingerprints()) {
-            return FingerprintAuthConstants.NOT_ENROLLED;
+        if (fingerprintManager == null || !fingerprintManager.isHardwareDetected()) {
+            return false;
         }
-        return FingerprintAuthConstants.IS_SUPPORTED;
+
+        return fingerprintManager.hasEnrolledFingerprints();
     }
 
     @Override

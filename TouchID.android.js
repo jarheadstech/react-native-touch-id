@@ -1,14 +1,13 @@
 import { NativeModules, processColor } from 'react-native';
-import { androidApiErrorMap, androidModuleErrorMap } from './data/errors';
-import { getError, TouchIDError, TouchIDUnifiedError } from './errors';
 const NativeTouchID = NativeModules.FingerprintAuth;
+// Android provides more flexibility than iOS for handling the Fingerprint. Currently the config object accepts customizable title or color. Otherwise it defaults to this constant
 
 export default {
-  isSupported(config) {
+  isSupported() {
     return new Promise((resolve, reject) => {
       NativeTouchID.isSupported(
-        (error, code) => {
-          return reject(createError(config, error, code));
+        error => {
+          return reject(typeof error == 'String' ? createError(error, error) : createError(error));
         },
         success => {
           return resolve(true);
@@ -18,29 +17,19 @@ export default {
   },
 
   authenticate(reason, config) {
-    var DEFAULT_CONFIG = {
-      title: 'Authentication Required',
-      imageColor: '#1306ff',
-      imageErrorColor: '#ff0000',
-      sensorDescription: 'Touch sensor',
-      sensorErrorDescription: 'Failed',
-      cancelText: 'Cancel',
-      unifiedErrors: false
-    };
+    DEFAULT_CONFIG = { title: 'Authentication Required', color: '#1306ff' };
     var authReason = reason ? reason : ' ';
     var authConfig = Object.assign({}, DEFAULT_CONFIG, config);
-    var imageColor = processColor(authConfig.imageColor);
-    var imageErrorColor = processColor(authConfig.imageErrorColor);
+    var color = processColor(authConfig.color);
 
-    authConfig.imageColor = imageColor;
-    authConfig.imageErrorColor = imageErrorColor;
+    authConfig.color = color;
 
     return new Promise((resolve, reject) => {
       NativeTouchID.authenticate(
         authReason,
         authConfig,
-        (error, code) => {
-          return reject(createError(authConfig, error, code));
+        error => {
+          return reject(typeof error == 'String' ? createError(error, error) : createError(error));
         },
         success => {
           return resolve(true);
@@ -50,13 +39,22 @@ export default {
   }
 };
 
-function createError(config, error, code) {
-  const { unifiedErrors } = config || {};
-  const errorCode = androidApiErrorMap[code] || androidModuleErrorMap[code];
+function TouchIDError(name, details) {
+  this.name = name || 'TouchIDError';
+  this.message = details.message || 'Touch ID Error';
+  this.details = details || {};
+}
 
-  if (unifiedErrors) {
-    return new TouchIDUnifiedError(getError(errorCode));
+TouchIDError.prototype = Object.create(Error.prototype);
+TouchIDError.prototype.constructor = TouchIDError;
+
+function createError(error) {
+  if (error.hasOwnProperty('message')) {
+    return new TouchIDError('Touch ID Error', error);
+  } else {
+    const details = {
+      message: error,
+    }
+    return new TouchIDError('Touch ID Error', details);
   }
-
-  return new TouchIDError('Touch ID Error', error, errorCode);
 }

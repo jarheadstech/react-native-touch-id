@@ -6,19 +6,18 @@
 
 import { NativeModules } from 'react-native';
 const NativeTouchID = NativeModules.TouchID;
-const { iOSErrors } = require('./data/errors');
-const { getError, TouchIDError, TouchIDUnifiedError } = require('./errors');
+const ERRORS = require('./data/errors');
 
 /**
  * High-level docs for the TouchID iOS API can be written here.
  */
 
 export default {
-  isSupported(config) {
+  isSupported() {
     return new Promise((resolve, reject) => {
-      NativeTouchID.isSupported(config, (error, biometryType) => {
+      NativeTouchID.isSupported((error, biometryType) => {
         if (error) {
-          return reject(createError(config, error.message));
+          return reject(createError(error.message));
         }
 
         resolve(biometryType);
@@ -27,19 +26,15 @@ export default {
   },
 
   authenticate(reason, config) {
-    const DEFAULT_CONFIG = {
-      fallbackLabel: null,
-      unifiedErrors: false,
-      passcodeFallback: false
-    };
+    const DEFAULT_CONFIG = { fallbackLabel: null };
     const authReason = reason ? reason : ' ';
-    const authConfig = Object.assign({}, DEFAULT_CONFIG, config);
+    const authConfig = config ? config : DEFAULT_CONFIG;
 
     return new Promise((resolve, reject) => {
       NativeTouchID.authenticate(authReason, authConfig, error => {
         // Return error if rejected
         if (error) {
-          return reject(createError(authConfig, error.message));
+          return reject(createError(error.message));
         }
 
         resolve(true);
@@ -48,14 +43,17 @@ export default {
   }
 };
 
-function createError(config, error) {
-  const { unifiedErrors } = config || {};
+function TouchIDError(name, details) {
+  this.name = name || 'TouchIDError';
+  this.message = details.message || 'Touch ID Error';
+  this.details = details || {};
+}
 
-  if (unifiedErrors) {
-    return new TouchIDUnifiedError(getError(error));
-  }
+TouchIDError.prototype = Object.create(Error.prototype);
+TouchIDError.prototype.constructor = TouchIDError;
 
-  const details = iOSErrors[error];
+function createError(error) {
+  let details = ERRORS[error];
   details.name = error;
 
   return new TouchIDError(error, details);
